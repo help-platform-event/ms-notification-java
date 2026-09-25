@@ -1,0 +1,46 @@
+# Service names are prefixed (notification-*) because event-app's docker-compose.dev.yml includes
+# this file next to ms-auth-java's, which already has `mysql` and `app`.
+services:
+  notification-mysql:
+    image: 'mysql:8.4'
+    environment:
+      MYSQL_DATABASE: 'ms_notification'
+      MYSQL_USER: 'ms_notification'
+      MYSQL_PASSWORD: 'ms_notification'
+      MYSQL_ROOT_PASSWORD: 'root'
+    # Host port 3309: 3307 is ms-auth-java's MySQL, 3308 the Gateway's.
+    ports:
+      - '3309:3306'
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-proot']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Fake SMTP server: catches every email; web UI on http://localhost:8025.
+  mailpit:
+    image: 'axllent/mailpit:latest'
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+
+  # The app itself. Behind the `app` profile so spring-boot:run never starts it. It needs Kafka on
+  # the same network (`kafka:29092`), which exists when run from event-app's docker-compose.dev.yml
+  # (`pnpm stack:up`), where ms-auth-java's compose is included too.
+  notification-app:
+    build: .
+    profiles: ['app']
+    ports:
+      - '8085:8085'
+    environment:
+      SPRING_DATASOURCE_URL: 'jdbc:mysql://notification-mysql:3306/ms_notification'
+      SPRING_DATASOURCE_USERNAME: 'ms_notification'
+      SPRING_DATASOURCE_PASSWORD: 'ms_notification'
+      KAFKA_BOOTSTRAP_SERVERS: 'kafka:29092'
+      MAIL_HOST: 'mailpit'
+      MAIL_PORT: '1025'
+    depends_on:
+      notification-mysql:
+        condition: service_healthy
+      mailpit:
+        condition: service_started

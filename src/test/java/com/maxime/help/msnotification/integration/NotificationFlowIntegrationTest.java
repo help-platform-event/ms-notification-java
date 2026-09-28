@@ -50,10 +50,7 @@ import org.testcontainers.mysql.MySQLContainer;
 @SpringBootTest(
         properties = {
             "spring.mail.host=localhost",
-            "spring.mail.port=3025", // ServerSetupTest.SMTP
-            // Short retry delays so the outage scenario reaches the dead-letter topic quickly.
-            "app.email.retry.initial-delay-ms=200",
-            "app.email.retry.multiplier=1.5"
+            "spring.mail.port=3025" // ServerSetupTest.SMTP
         })
 class NotificationFlowIntegrationTest {
 
@@ -72,7 +69,7 @@ class NotificationFlowIntegrationTest {
             .withConfiguration(GreenMailConfiguration.aConfig().withDisabledAuthentication())
             .withPerMethodLifecycle(true);
 
-    private static final String DLT = "notification.email.requested-dlt";
+    private static final String USER_REGISTERED_DLT = "auth.user.registered-dlt";
 
     @Autowired
     RecipientRepository recipientRepository;
@@ -80,17 +77,20 @@ class NotificationFlowIntegrationTest {
     private KafkaProducer<String, String> producer;
 
     /**
-     * ms-auth's topics don't exist in this broker (ms-auth isn't running), so create them before
-     * the application's listeners subscribe, as ms-auth would at its own startup.
+     * The consumed topics belong to their producers (ms-auth, the Gateway), which aren't running
+     * here: create them before the application's listeners subscribe, as the producers would at
+     * their own startup.
      */
     @BeforeAll
-    static void createAuthTopics() throws Exception {
+    static void createProducerTopics() throws Exception {
         try (AdminClient admin =
                 AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers()))) {
             admin.createTopics(List.of(
                             new NewTopic("auth.user.registered", 3, (short) 1),
                             new NewTopic("auth.user.settings-changed", 3, (short) 1),
-                            new NewTopic("auth.password.changed", 3, (short) 1)))
+                            new NewTopic("auth.password.changed", 3, (short) 1),
+                            new NewTopic("event.participation.requested", 3, (short) 1),
+                            new NewTopic("event.participation.decided", 3, (short) 1)))
                     .all()
                     .get();
         }
@@ -214,24 +214,26 @@ class NotificationFlowIntegrationTest {
     }
 
     @Test
-    void anUnparseableEmailRequest_goesStraightToTheDeadLetterTopic() {
+    void anUnparseableEvent_goesStraightToTheDeadLetterTopic() {
         String key = "poison-" + UUID.randomUUID();
-        producer.send(new ProducerRecord<>("notification.email.requested", key, "{not json"));
+        producer.send(new ProducerRecord<>("auth.user.registered", key, "{not json"));
 
         assertThat(awaitDeadLetter(key).value()).isEqualTo("{not json");
     }
 
     @Test
-    void smtpOutage_retriesThenDeadLetters_theEmailRequest() {
+    void smtpOutage_retriesThenDeadLetters_theEvent() {
         SMTP.stop();
         UUID userId = UUID.randomUUID();
 
         produce("auth.user.registered", userId, userRegistered(
                 UUID.randomUUID(), userId, "outage-" + userId + "@example.com", "\"2026-09-25T10:00:00Z\""));
 
-        // 4 attempts (main topic + 3 retry topics), then the dead-letter topic, same key.
+        // First attempt + 3 retries (after 2 s, 4 s, 8 s), then the dead-letter topic, same key.
         ConsumerRecord<String, String> dead = awaitDeadLetter(userId.toString());
         assertThat(dead.value()).contains("outage-" + userId + "@example.com");
+        // Rolled back: the event isn't marked processed, so replaying it later would still work.
+        assertThat(recipientRepository.findByUserId(userId)).isEmpty();
     }
 
     // --- helpers ---
@@ -279,7 +281,7 @@ class NotificationFlowIntegrationTest {
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         List<ConsumerRecord<String, String>> found = new ArrayList<>();
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
-            consumer.subscribe(List.of(DLT));
+            consumer.subscribe(List.of(USER_REGISTERED_DLT));
             Awaitility.await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
                 consumer.poll(Duration.ofMillis(500)).forEach(record -> {
                     if (key.equals(record.key())) {

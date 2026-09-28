@@ -2,7 +2,7 @@ package com.maxime.help.msnotification.application.service;
 
 import com.maxime.help.msnotification.domain.model.NotificationPreferences;
 import com.maxime.help.msnotification.domain.model.Recipient;
-import com.maxime.help.msnotification.domain.port.out.EmailRequestPublisher;
+import com.maxime.help.msnotification.domain.port.out.EmailSender;
 import com.maxime.help.msnotification.domain.port.out.ProcessedEventRepository;
 import com.maxime.help.msnotification.domain.port.out.RecipientRepository;
 import java.util.UUID;
@@ -12,9 +12,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Reacts to ms-auth's events: keeps the local projection of recipients up to date and requests the
+ * Reacts to ms-auth's events: keeps the local projection of recipients up to date and sends the
  * transactional emails. Each method is idempotent on the event id — a redelivered event changes
- * nothing and sends nothing twice.
+ * nothing and sends nothing twice. If sending fails, the exception rolls the whole method back and
+ * the event is consumed again later (see {@code KafkaConfig}).
  */
 @Service
 public class AuthEventService {
@@ -23,15 +24,15 @@ public class AuthEventService {
 
     private final RecipientRepository recipientRepository;
     private final ProcessedEventRepository processedEventRepository;
-    private final EmailRequestPublisher emailRequestPublisher;
+    private final EmailSender emailSender;
 
     AuthEventService(
             RecipientRepository recipientRepository,
             ProcessedEventRepository processedEventRepository,
-            EmailRequestPublisher emailRequestPublisher) {
+            EmailSender emailSender) {
         this.recipientRepository = recipientRepository;
         this.processedEventRepository = processedEventRepository;
-        this.emailRequestPublisher = emailRequestPublisher;
+        this.emailSender = emailSender;
     }
 
     @Transactional
@@ -47,7 +48,7 @@ public class AuthEventService {
                 })
                 .orElseGet(() -> Recipient.registered(userId, email));
         recipientRepository.save(recipient);
-        emailRequestPublisher.publish(EmailContents.welcome(userId, email));
+        emailSender.send(EmailContents.welcome(email));
         processedEventRepository.markProcessed(eventId);
     }
 
@@ -76,7 +77,7 @@ public class AuthEventService {
                 .findByUserId(userId)
                 .flatMap(Recipient::getEmail)
                 .ifPresentOrElse(
-                        email -> emailRequestPublisher.publish(EmailContents.passwordChanged(userId, email)),
+                        email -> emailSender.send(EmailContents.passwordChanged(email)),
                         () -> log.warn("No known email for user {}: password-changed email skipped", userId));
         processedEventRepository.markProcessed(eventId);
     }

@@ -1,10 +1,9 @@
 package com.maxime.help.msnotification.application.service;
 
-import com.maxime.help.msnotification.domain.model.EmailRequest;
+import com.maxime.help.msnotification.domain.model.Email;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
-import java.util.UUID;
 
 /** Texts of the emails this service sends. Plain text for now (HTML templates are out of v1). */
 final class EmailContents {
@@ -19,10 +18,8 @@ final class EmailContents {
 
     private EmailContents() {}
 
-    static EmailRequest welcome(UUID recipientUserId, String to) {
-        return new EmailRequest(
-                UUID.randomUUID(),
-                recipientUserId,
+    static Email welcome(String to) {
+        return new Email(
                 to,
                 "Bienvenue sur H.E.L.P",
                 """
@@ -35,10 +32,8 @@ final class EmailContents {
                 L'équipe H.E.L.P""");
     }
 
-    static EmailRequest passwordChanged(UUID recipientUserId, String to) {
-        return new EmailRequest(
-                UUID.randomUUID(),
-                recipientUserId,
+    static Email passwordChanged(String to) {
+        return new Email(
                 to,
                 "Votre mot de passe a été modifié",
                 """
@@ -50,12 +45,10 @@ final class EmailContents {
                 L'équipe H.E.L.P""");
     }
 
-    static EmailRequest participationRequested(String to, ParticipationActivity activity) {
-        return new EmailRequest(
-                UUID.randomUUID(),
-                activity.recipientUserId(),
+    static Email participationRequested(String to, ParticipationActivity activity) {
+        return new Email(
                 to,
-                "Nouvelle demande de participation : " + activity.eventTitle(),
+                "Nouvelle demande de participation : " + oneLine(activity.eventTitle()),
                 """
                 Bonjour,
 
@@ -65,14 +58,12 @@ final class EmailContents {
                 L'équipe H.E.L.P""".formatted(SLOT_DATE.format(activity.slotStartAt()), activity.eventTitle()));
     }
 
-    static EmailRequest participationDecided(String to, ParticipationActivity activity, boolean accepted) {
+    static Email participationDecided(String to, ParticipationActivity activity, boolean accepted) {
         String slot = SLOT_DATE.format(activity.slotStartAt());
         String title = activity.eventTitle();
-        return new EmailRequest(
-                UUID.randomUUID(),
-                activity.recipientUserId(),
+        return new Email(
                 to,
-                (accepted ? "Participation acceptée : " : "Participation refusée : ") + title,
+                (accepted ? "Participation acceptée : " : "Participation refusée : ") + oneLine(title),
                 accepted
                         ? """
                         Bonjour,
@@ -88,5 +79,13 @@ final class EmailContents {
                         retenue par l'organisateur. D'autres créneaux vous attendent sur H.E.L.P.
 
                         L'équipe H.E.L.P""".formatted(slot, title));
+    }
+
+    /**
+     * Event titles are typed by users. A line break inside an email header could be used to inject
+     * extra headers, so the subject gets the title on a single line.
+     */
+    private static String oneLine(String text) {
+        return text.replaceAll("[\\r\\n]+", " ");
     }
 }

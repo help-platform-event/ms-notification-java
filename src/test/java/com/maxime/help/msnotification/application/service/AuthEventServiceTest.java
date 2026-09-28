@@ -6,10 +6,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.maxime.help.msnotification.domain.model.EmailRequest;
+import com.maxime.help.msnotification.domain.model.Email;
 import com.maxime.help.msnotification.domain.model.NotificationPreferences;
 import com.maxime.help.msnotification.domain.model.Recipient;
-import com.maxime.help.msnotification.domain.port.out.EmailRequestPublisher;
+import com.maxime.help.msnotification.domain.port.out.EmailSender;
 import com.maxime.help.msnotification.domain.port.out.ProcessedEventRepository;
 import com.maxime.help.msnotification.domain.port.out.RecipientRepository;
 import java.util.Optional;
@@ -32,7 +32,7 @@ class AuthEventServiceTest {
 
     @Mock private RecipientRepository recipientRepository;
     @Mock private ProcessedEventRepository processedEventRepository;
-    @Mock private EmailRequestPublisher emailRequestPublisher;
+    @Mock private EmailSender emailSender;
 
     @InjectMocks private AuthEventService service;
 
@@ -45,8 +45,8 @@ class AuthEventServiceTest {
         ArgumentCaptor<Recipient> saved = ArgumentCaptor.forClass(Recipient.class);
         verify(recipientRepository).save(saved.capture());
         assertThat(saved.getValue().getEmail()).contains("alice@example.com");
-        ArgumentCaptor<EmailRequest> email = ArgumentCaptor.forClass(EmailRequest.class);
-        verify(emailRequestPublisher).publish(email.capture());
+        ArgumentCaptor<Email> email = ArgumentCaptor.forClass(Email.class);
+        verify(emailSender).send(email.capture());
         assertThat(email.getValue().to()).isEqualTo("alice@example.com");
         assertThat(email.getValue().subject()).contains("Bienvenue");
         verify(processedEventRepository).markProcessed(EVENT_ID);
@@ -74,7 +74,7 @@ class AuthEventServiceTest {
         service.onPasswordChanged(EVENT_ID, USER_ID);
 
         verify(recipientRepository, never()).save(any());
-        verify(emailRequestPublisher, never()).publish(any());
+        verify(emailSender, never()).send(any());
         verify(processedEventRepository, never()).markProcessed(any());
     }
 
@@ -88,7 +88,7 @@ class AuthEventServiceTest {
         verify(recipientRepository).save(saved.capture());
         assertThat(saved.getValue().getPreferences()).isEqualTo(MUTED);
         assertThat(saved.getValue().getEmail()).isEmpty();
-        verify(emailRequestPublisher, never()).publish(any());
+        verify(emailSender, never()).send(any());
     }
 
     @Test
@@ -99,8 +99,8 @@ class AuthEventServiceTest {
 
         service.onPasswordChanged(EVENT_ID, USER_ID);
 
-        ArgumentCaptor<EmailRequest> email = ArgumentCaptor.forClass(EmailRequest.class);
-        verify(emailRequestPublisher).publish(email.capture());
+        ArgumentCaptor<Email> email = ArgumentCaptor.forClass(Email.class);
+        verify(emailSender).send(email.capture());
         assertThat(email.getValue().subject()).contains("mot de passe");
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
@@ -111,7 +111,7 @@ class AuthEventServiceTest {
 
         service.onPasswordChanged(EVENT_ID, USER_ID);
 
-        verify(emailRequestPublisher, never()).publish(any());
+        verify(emailSender, never()).send(any());
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
 }

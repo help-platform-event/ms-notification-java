@@ -1,9 +1,9 @@
 package com.maxime.help.msnotification.application.service;
 
-import com.maxime.help.msnotification.domain.model.EmailRequest;
+import com.maxime.help.msnotification.domain.model.Email;
 import com.maxime.help.msnotification.domain.model.NotificationCategory;
 import com.maxime.help.msnotification.domain.model.Recipient;
-import com.maxime.help.msnotification.domain.port.out.EmailRequestPublisher;
+import com.maxime.help.msnotification.domain.port.out.EmailSender;
 import com.maxime.help.msnotification.domain.port.out.ProcessedEventRepository;
 import com.maxime.help.msnotification.domain.port.out.RecipientRepository;
 import java.util.Optional;
@@ -27,15 +27,15 @@ public class ParticipationEventService {
 
     private final RecipientRepository recipientRepository;
     private final ProcessedEventRepository processedEventRepository;
-    private final EmailRequestPublisher emailRequestPublisher;
+    private final EmailSender emailSender;
 
     ParticipationEventService(
             RecipientRepository recipientRepository,
             ProcessedEventRepository processedEventRepository,
-            EmailRequestPublisher emailRequestPublisher) {
+            EmailSender emailSender) {
         this.recipientRepository = recipientRepository;
         this.processedEventRepository = processedEventRepository;
-        this.emailRequestPublisher = emailRequestPublisher;
+        this.emailSender = emailSender;
     }
 
     @Transactional
@@ -51,12 +51,12 @@ public class ParticipationEventService {
     private void notifyIfAllowed(
             UUID eventId,
             ParticipationActivity activity,
-            BiFunction<String, ParticipationActivity, EmailRequest> email) {
+            BiFunction<String, ParticipationActivity, Email> email) {
         if (processedEventRepository.isProcessed(eventId)) {
             return;
         }
         emailAddressFor(activity)
-                .ifPresent(to -> emailRequestPublisher.publish(email.apply(to, activity)));
+                .ifPresent(to -> emailSender.send(email.apply(to, activity)));
         processedEventRepository.markProcessed(eventId);
     }
 

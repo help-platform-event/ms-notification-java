@@ -1,19 +1,32 @@
 package com.maxime.help.msnotification.infrastructure.messaging;
 
 import org.apache.kafka.clients.admin.NewTopic;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
+import org.springframework.kafka.core.KafkaAdmin;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.ConsumerRecordRecoverer;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.converter.RecordMessageConverter;
 import org.springframework.kafka.support.converter.StringJacksonJsonMessageConverter;
+import org.springframework.util.backoff.ExponentialBackOff;
 
 @Configuration
 class KafkaConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(KafkaConfig.class);
+
+    /** Same as the source topics, so a dead letter keeps its original partition number. */
+    private static final int PARTITIONS = 3;
+
     /**
      * Records are consumed as plain strings, then converted to each {@code @KafkaListener} method's
-     * parameter type (e.g. {@code UserRegisteredMessage}). No type header is needed: ms-auth
-     * doesn't send one, and the listener's signature says what the topic contains. Spring Boot
+     * parameter type (e.g. {@code UserRegisteredMessage}). No type header is needed: the producers
+     * don't send one, and the listener's signature says what the topic contains. Spring Boot
      * applies this converter to the default listener container factory.
      */
     @Bean
@@ -21,25 +34,39 @@ class KafkaConfig {
         return new StringJacksonJsonMessageConverter();
     }
 
-    /** Same partitioning as ms-auth's topics: keyed by user id, 3 partitions. */
-    @Bean
-    NewTopic emailRequestedTopic() {
-        return TopicBuilder.name(NotificationTopics.EMAIL_REQUESTED).partitions(3).build();
-    }
-
     /**
-     * The Gateway creates its topics too, but only once it connects to Kafka. Declaring them here as
-     * well matters: otherwise, if this service starts first, subscribing to a missing topic makes
-     * the broker auto-create it with a single partition, and the Gateway's "create if absent" then
-     * keeps that one partition. Declaring the same topic on both sides is harmless.
+     * What happens when a listener throws (e.g. the SMTP server is down): the record is retried
+     * after 2 s, 4 s and 8 s, then published to {@code <topic>-dlt} and the consumer moves on. The
+     * dead-letter topic keeps the failed message for inspection or replay. A message that can't
+     * be parsed is not retried: it goes to the dead-letter topic at once. Spring Boot applies this
+     * handler to the default listener container factory.
      */
     @Bean
-    NewTopic participationRequestedTopic() {
-        return TopicBuilder.name(NotificationTopics.PARTICIPATION_REQUESTED).partitions(3).build();
+    DefaultErrorHandler errorHandler(KafkaTemplate<?, ?> kafkaTemplate) {
+        ExponentialBackOff backOff = new ExponentialBackOff(2_000, 2.0);
+        backOff.setMaxAttempts(3);
+        DeadLetterPublishingRecoverer deadLetter = new DeadLetterPublishingRecoverer(kafkaTemplate);
+        // Spring logs nothing when it hands a record to the recoverer: say it here.
+        ConsumerRecordRecoverer logThenDeadLetter = (record, exception) -> {
+            log.error(
+                    "Giving up on {}-{}@{} (key {}), sent to the dead-letter topic: {}",
+                    record.topic(),
+                    record.partition(),
+                    record.offset(),
+                    record.key(),
+                    exception.getMessage());
+            deadLetter.accept(record, exception);
+        };
+        return new DefaultErrorHandler(logThenDeadLetter, backOff);
     }
 
+    /** This service writes the dead-letter topics, so it declares them (one per consumed topic). */
     @Bean
-    NewTopic participationDecidedTopic() {
-        return TopicBuilder.name(NotificationTopics.PARTICIPATION_DECIDED).partitions(3).build();
+    KafkaAdmin.NewTopics deadLetterTopics() {
+        return new KafkaAdmin.NewTopics(NotificationTopics.ALL.stream()
+                .map(topic -> TopicBuilder.name(NotificationTopics.deadLetterTopic(topic))
+                        .partitions(PARTITIONS)
+                        .build())
+                .toArray(NewTopic[]::new));
     }
 }

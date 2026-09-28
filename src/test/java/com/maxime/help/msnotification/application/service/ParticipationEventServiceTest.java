@@ -74,6 +74,20 @@ class ParticipationEventServiceTest {
     }
 
     @Test
+    void aLineBreakInTheEventTitle_neverReachesTheSubject() {
+        when(recipientRepository.findByUserId(VOLUNTEER_ID))
+                .thenReturn(Optional.of(Recipient.registered(VOLUNTEER_ID, "vol@example.com")));
+        ParticipationActivity injected = new ParticipationActivity(
+                42, VOLUNTEER_ID, ORGANIZER_ID, "Fête\r\nBcc: victim@example.com", SLOT_START);
+
+        service.onParticipationDecided(EVENT_ID, injected, true);
+
+        assertThat(capturedEmail().subject())
+                .isEqualTo("Participation acceptée : Fête Bcc: victim@example.com")
+                .doesNotContain("\r", "\n");
+    }
+
+    @Test
     void decided_rejected_usesTheRejectionText() {
         when(recipientRepository.findByUserId(VOLUNTEER_ID))
                 .thenReturn(Optional.of(Recipient.registered(VOLUNTEER_ID, "vol@example.com")));

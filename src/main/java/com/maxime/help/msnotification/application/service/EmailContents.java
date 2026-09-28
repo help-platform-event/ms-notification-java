@@ -48,7 +48,7 @@ final class EmailContents {
     static Email participationRequested(String to, ParticipationActivity activity) {
         return new Email(
                 to,
-                "Nouvelle demande de participation : " + activity.eventTitle(),
+                "Nouvelle demande de participation : " + oneLine(activity.eventTitle()),
                 """
                 Bonjour,
 
@@ -63,7 +63,7 @@ final class EmailContents {
         String title = activity.eventTitle();
         return new Email(
                 to,
-                (accepted ? "Participation acceptée : " : "Participation refusée : ") + title,
+                (accepted ? "Participation acceptée : " : "Participation refusée : ") + oneLine(title),
                 accepted
                         ? """
                         Bonjour,
@@ -79,5 +79,13 @@ final class EmailContents {
                         retenue par l'organisateur. D'autres créneaux vous attendent sur H.E.L.P.
 
                         L'équipe H.E.L.P""".formatted(slot, title));
+    }
+
+    /**
+     * Event titles are typed by users. A line break inside an email header could be used to inject
+     * extra headers, so the subject gets the title on a single line.
+     */
+    private static String oneLine(String text) {
+        return text.replaceAll("[\\r\\n]+", " ");
     }
 }

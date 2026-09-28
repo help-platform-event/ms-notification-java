@@ -86,6 +86,29 @@ final class EmailContents {
                         L'équipe H.E.L.P""".formatted(slot, title));
     }
 
+    static Email participationCancelled(String to, ParticipationActivity activity, boolean byOrganizer) {
+        String slot = slotDate(activity);
+        String title = activity.eventTitle();
+        return new Email(
+                to,
+                "Participation annulée : " + oneLine(title),
+                byOrganizer
+                        ? """
+                        Bonjour,
+
+                        L'organisateur a annulé votre participation au créneau du %s de l'événement \
+                        « %s ». D'autres créneaux vous attendent sur H.E.L.P.
+
+                        L'équipe H.E.L.P""".formatted(slot, title)
+                        : """
+                        Bonjour,
+
+                        Un bénévole a annulé sa participation au créneau du %s de votre événement \
+                        « %s ». La place est de nouveau disponible.
+
+                        L'équipe H.E.L.P""".formatted(slot, title));
+    }
+
     /**
      * Event titles are typed by users. A line break inside an email header could be used to inject
      * extra headers, so the subject gets the title on a single line.

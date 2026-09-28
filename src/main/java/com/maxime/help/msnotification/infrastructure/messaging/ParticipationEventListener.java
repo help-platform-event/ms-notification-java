@@ -2,6 +2,7 @@ package com.maxime.help.msnotification.infrastructure.messaging;
 
 import com.maxime.help.msnotification.application.service.ParticipationActivity;
 import com.maxime.help.msnotification.application.service.ParticipationEventService;
+import com.maxime.help.msnotification.infrastructure.messaging.dto.ParticipationCancelledMessage;
 import com.maxime.help.msnotification.infrastructure.messaging.dto.ParticipationDecidedMessage;
 import com.maxime.help.msnotification.infrastructure.messaging.dto.ParticipationRequestedMessage;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -44,5 +45,18 @@ class ParticipationEventListener {
                         message.event().title(),
                         message.slot().startAt()),
                 message.status() == ParticipationDecidedMessage.Decision.ACCEPTED);
+    }
+
+    @KafkaListener(topics = NotificationTopics.PARTICIPATION_CANCELLED)
+    void onParticipationCancelled(ParticipationCancelledMessage message) {
+        participationEventService.onParticipationCancelled(
+                message.eventId(),
+                new ParticipationActivity(
+                        message.participationId(),
+                        message.recipientUserId(),
+                        message.actorUserId(),
+                        message.event().title(),
+                        message.slot().startAt()),
+                message.cancelledBy() == ParticipationCancelledMessage.CancelledBy.ORGANIZER);
     }
 }

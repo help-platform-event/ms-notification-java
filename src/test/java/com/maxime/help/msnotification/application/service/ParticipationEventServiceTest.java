@@ -122,6 +122,46 @@ class ParticipationEventServiceTest {
     }
 
     @Test
+    void cancelledByTheVolunteer_tellsTheOrganizer() {
+        when(recipientRepository.findByUserId(ORGANIZER_ID))
+                .thenReturn(Optional.of(Recipient.registered(ORGANIZER_ID, "orga@example.com")));
+
+        service.onParticipationCancelled(EVENT_ID, REQUESTED, false);
+
+        ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(saved.capture());
+        assertThat(saved.getValue().getTitle()).isEqualTo("Participation annulée");
+        assertThat(saved.getValue().getMessage()).startsWith("Un bénévole a annulé sa participation");
+        assertThat(capturedEmail().subject()).isEqualTo("Participation annulée : Clean-up day");
+    }
+
+    @Test
+    void cancelledByTheOrganizer_tellsTheVolunteer() {
+        when(recipientRepository.findByUserId(VOLUNTEER_ID))
+                .thenReturn(Optional.of(Recipient.registered(VOLUNTEER_ID, "vol@example.com")));
+
+        service.onParticipationCancelled(EVENT_ID, DECIDED, true);
+
+        ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(saved.capture());
+        assertThat(saved.getValue().getMessage()).startsWith("L'organisateur a annulé votre participation");
+        assertThat(capturedEmail().body()).contains("L'organisateur a annulé votre participation");
+    }
+
+    @Test
+    void cancellation_isNotSent_whenEventActivityIsMuted() {
+        Recipient muted = Recipient.registered(ORGANIZER_ID, "orga@example.com");
+        muted.changePreferences(new NotificationPreferences(true, false, true, true, true, true, true));
+        when(recipientRepository.findByUserId(ORGANIZER_ID)).thenReturn(Optional.of(muted));
+
+        service.onParticipationCancelled(EVENT_ID, REQUESTED, false);
+
+        verify(notificationRepository, never()).save(any());
+        verify(emailSender, never()).send(any());
+        verify(processedEventRepository).markProcessed(EVENT_ID);
+    }
+
+    @Test
     void eventActivityMuted_sendsNothing_butMarksTheEventProcessed() {
         Recipient muted = Recipient.registered(VOLUNTEER_ID, "vol@example.com");
         muted.changePreferences(new NotificationPreferences(true, false, true, true, true, true, true));

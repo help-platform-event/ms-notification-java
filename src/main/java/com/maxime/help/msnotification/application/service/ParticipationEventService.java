@@ -67,6 +67,15 @@ public class ParticipationEventService {
                 to -> EmailContents.participationDecided(to, activity, accepted));
     }
 
+    @Transactional
+    public void onParticipationCancelled(UUID eventId, ParticipationActivity activity, boolean byOrganizer) {
+        notifyIfAllowed(
+                eventId,
+                activity,
+                NotificationContents.participationCancelled(activity, byOrganizer, clock.instant()),
+                to -> EmailContents.participationCancelled(to, activity, byOrganizer));
+    }
+
     private void notifyIfAllowed(
             UUID eventId, ParticipationActivity activity, Notification inApp, Function<String, Email> email) {
         if (processedEventRepository.isProcessed(eventId)) {

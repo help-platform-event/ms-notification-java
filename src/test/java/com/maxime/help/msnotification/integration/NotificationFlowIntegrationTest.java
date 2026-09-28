@@ -95,7 +95,8 @@ class NotificationFlowIntegrationTest {
                             new NewTopic("auth.user.settings-changed", 3, (short) 1),
                             new NewTopic("auth.password.changed", 3, (short) 1),
                             new NewTopic("event.participation.requested", 3, (short) 1),
-                            new NewTopic("event.participation.decided", 3, (short) 1)))
+                            new NewTopic("event.participation.decided", 3, (short) 1),
+                            new NewTopic("event.participation.cancelled", 3, (short) 1)))
                     .all()
                     .get();
         }
@@ -200,6 +201,24 @@ class NotificationFlowIntegrationTest {
                     assertThat(n.getTitle()).isEqualTo("Participation acceptée");
                     assertThat(n.isRead()).isFalse();
                 });
+    }
+
+    @Test
+    void participationCancelledByTheOrganizer_notifiesTheVolunteer() throws Exception {
+        UUID userId = UUID.randomUUID();
+        String email = "cancelled-" + userId + "@example.com";
+        produce("auth.user.registered", userId, userRegistered(UUID.randomUUID(), userId, email, "\"2026-09-25T10:00:00Z\""));
+        awaitEmailsTo(email, 1);
+
+        produce("event.participation.cancelled", userId, """
+                {"eventId":"%s","occurredAt":"2026-09-28T09:00:00.000Z","participationId":42,
+                 "recipientUserId":"%s","actorUserId":"%s","event":{"id":7,"title":"Clean-up day"},
+                 "slot":{"id":1,"startAt":"2026-10-03T08:00:00.000Z"},"cancelledBy":"ORGANIZER"}
+                """.formatted(UUID.randomUUID(), userId, UUID.randomUUID()));
+
+        awaitEmailsTo(email, 2);
+        assertThat(subjectsTo(email)).contains("Participation annulée : Clean-up day");
+        assertThat(notificationRepository.countUnreadByUserId(userId)).isEqualTo(1);
     }
 
     @Test

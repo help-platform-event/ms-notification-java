@@ -26,4 +26,20 @@ class KafkaConfig {
     NewTopic emailRequestedTopic() {
         return TopicBuilder.name(NotificationTopics.EMAIL_REQUESTED).partitions(3).build();
     }
+
+    /**
+     * The Gateway creates its topics too, but only once it connects to Kafka. Declaring them here as
+     * well matters: otherwise, if this service starts first, subscribing to a missing topic makes
+     * the broker auto-create it with a single partition, and the Gateway's "create if absent" then
+     * keeps that one partition. Declaring the same topic on both sides is harmless.
+     */
+    @Bean
+    NewTopic participationRequestedTopic() {
+        return TopicBuilder.name(NotificationTopics.PARTICIPATION_REQUESTED).partitions(3).build();
+    }
+
+    @Bean
+    NewTopic participationDecidedTopic() {
+        return TopicBuilder.name(NotificationTopics.PARTICIPATION_DECIDED).partitions(3).build();
+    }
 }

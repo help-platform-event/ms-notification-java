@@ -1,6 +1,6 @@
 package com.maxime.help.msnotification.infrastructure.mail;
 
-import com.maxime.help.msnotification.domain.model.EmailRequest;
+import com.maxime.help.msnotification.domain.model.Email;
 import com.maxime.help.msnotification.domain.port.out.EmailSender;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
@@ -20,12 +20,12 @@ class JavaMailEmailSenderAdapter implements EmailSender {
     }
 
     @Override
-    public void send(EmailRequest request) {
+    public void send(Email email) {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(from);
-        message.setTo(request.to());
-        message.setSubject(request.subject());
-        message.setText(request.body());
+        message.setTo(email.to());
+        message.setSubject(email.subject());
+        message.setText(email.body());
         mailSender.send(message);
     }
 }

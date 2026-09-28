@@ -1,16 +1,18 @@
 package com.maxime.help.msnotification.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.maxime.help.msnotification.domain.model.EmailRequest;
+import com.maxime.help.msnotification.domain.model.Email;
 import com.maxime.help.msnotification.domain.model.NotificationPreferences;
 import com.maxime.help.msnotification.domain.model.Recipient;
-import com.maxime.help.msnotification.domain.port.out.EmailRequestPublisher;
+import com.maxime.help.msnotification.domain.port.out.EmailSender;
 import com.maxime.help.msnotification.domain.port.out.ProcessedEventRepository;
 import com.maxime.help.msnotification.domain.port.out.RecipientRepository;
 import java.time.Instant;
@@ -22,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mail.MailSendException;
 
 /** Pure application-service test: every port is mocked. */
 @ExtendWith(MockitoExtension.class)
@@ -43,7 +46,7 @@ class ParticipationEventServiceTest {
 
     @Mock private RecipientRepository recipientRepository;
     @Mock private ProcessedEventRepository processedEventRepository;
-    @Mock private EmailRequestPublisher emailRequestPublisher;
+    @Mock private EmailSender emailSender;
 
     @InjectMocks private ParticipationEventService service;
 
@@ -54,9 +57,8 @@ class ParticipationEventServiceTest {
 
         service.onParticipationRequested(EVENT_ID, REQUESTED);
 
-        EmailRequest email = capturedEmail();
+        Email email = capturedEmail();
         assertThat(email.to()).isEqualTo("orga@example.com");
-        assertThat(email.recipientUserId()).isEqualTo(ORGANIZER_ID);
         assertThat(email.subject()).isEqualTo("Nouvelle demande de participation : Clean-up day");
         assertThat(email.body()).contains("samedi 3 octobre 2026 à 10h00", "« Clean-up day »");
         verify(processedEventRepository).markProcessed(EVENT_ID);
@@ -78,7 +80,7 @@ class ParticipationEventServiceTest {
 
         service.onParticipationDecided(EVENT_ID, DECIDED, false);
 
-        EmailRequest email = capturedEmail();
+        Email email = capturedEmail();
         assertThat(email.subject()).isEqualTo("Participation refusée : Clean-up day");
         assertThat(email.body()).contains("n'a pas été retenue");
     }
@@ -91,7 +93,7 @@ class ParticipationEventServiceTest {
 
         service.onParticipationDecided(EVENT_ID, DECIDED, true);
 
-        verify(emailRequestPublisher, never()).publish(any());
+        verify(emailSender, never()).send(any());
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
 
@@ -103,7 +105,7 @@ class ParticipationEventServiceTest {
 
         service.onParticipationDecided(EVENT_ID, DECIDED, true);
 
-        verify(emailRequestPublisher, never()).publish(any());
+        verify(emailSender, never()).send(any());
     }
 
     @Test
@@ -112,7 +114,7 @@ class ParticipationEventServiceTest {
 
         service.onParticipationRequested(EVENT_ID, REQUESTED);
 
-        verify(emailRequestPublisher, never()).publish(any());
+        verify(emailSender, never()).send(any());
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
 
@@ -123,7 +125,7 @@ class ParticipationEventServiceTest {
 
         service.onParticipationRequested(EVENT_ID, REQUESTED);
 
-        verify(emailRequestPublisher, never()).publish(any());
+        verify(emailSender, never()).send(any());
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
 
@@ -133,8 +135,19 @@ class ParticipationEventServiceTest {
 
         service.onParticipationRequested(EVENT_ID, self);
 
-        verifyNoInteractions(recipientRepository, emailRequestPublisher);
+        verifyNoInteractions(recipientRepository, emailSender);
         verify(processedEventRepository).markProcessed(EVENT_ID);
+    }
+
+    @Test
+    void aFailedSend_propagates_soTheEventIsNotMarkedProcessedAndWillBeRetried() {
+        when(recipientRepository.findByUserId(VOLUNTEER_ID))
+                .thenReturn(Optional.of(Recipient.registered(VOLUNTEER_ID, "vol@example.com")));
+        doThrow(new MailSendException("SMTP down")).when(emailSender).send(any());
+
+        assertThatThrownBy(() -> service.onParticipationDecided(EVENT_ID, DECIDED, true))
+                .isInstanceOf(MailSendException.class);
+        verify(processedEventRepository, never()).markProcessed(any());
     }
 
     @Test
@@ -144,13 +157,13 @@ class ParticipationEventServiceTest {
         service.onParticipationRequested(EVENT_ID, REQUESTED);
         service.onParticipationDecided(EVENT_ID, DECIDED, true);
 
-        verifyNoInteractions(recipientRepository, emailRequestPublisher);
+        verifyNoInteractions(recipientRepository, emailSender);
         verify(processedEventRepository, never()).markProcessed(any());
     }
 
-    private EmailRequest capturedEmail() {
-        ArgumentCaptor<EmailRequest> email = ArgumentCaptor.forClass(EmailRequest.class);
-        verify(emailRequestPublisher).publish(email.capture());
+    private Email capturedEmail() {
+        ArgumentCaptor<Email> email = ArgumentCaptor.forClass(Email.class);
+        verify(emailSender).send(email.capture());
         return email.getValue();
     }
 }

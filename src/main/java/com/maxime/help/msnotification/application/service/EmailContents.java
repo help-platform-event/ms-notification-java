@@ -18,6 +18,11 @@ final class EmailContents {
 
     private EmailContents() {}
 
+    /** The slot's start as users read it, e.g. "samedi 3 octobre 2026 à 10h00". */
+    static String slotDate(ParticipationActivity activity) {
+        return SLOT_DATE.format(activity.slotStartAt());
+    }
+
     static Email welcome(String to) {
         return new Email(
                 to,
@@ -55,11 +60,11 @@ final class EmailContents {
                 Un bénévole demande à participer au créneau du %s de votre événement « %s ».
                 Connectez-vous à H.E.L.P pour accepter ou refuser sa demande.
 
-                L'équipe H.E.L.P""".formatted(SLOT_DATE.format(activity.slotStartAt()), activity.eventTitle()));
+                L'équipe H.E.L.P""".formatted(slotDate(activity), activity.eventTitle()));
     }
 
     static Email participationDecided(String to, ParticipationActivity activity, boolean accepted) {
-        String slot = SLOT_DATE.format(activity.slotStartAt());
+        String slot = slotDate(activity);
         String title = activity.eventTitle();
         return new Email(
                 to,

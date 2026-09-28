@@ -8,6 +8,7 @@ import com.icegreen.greenmail.junit5.GreenMailExtension;
 import com.icegreen.greenmail.util.ServerSetupTest;
 import com.maxime.help.msnotification.domain.model.NotificationPreferences;
 import com.maxime.help.msnotification.domain.model.Recipient;
+import com.maxime.help.msnotification.domain.port.out.NotificationRepository;
 import com.maxime.help.msnotification.domain.port.out.RecipientRepository;
 import jakarta.mail.internet.MimeMessage;
 import java.time.Duration;
@@ -50,7 +51,8 @@ import org.testcontainers.mysql.MySQLContainer;
 @SpringBootTest(
         properties = {
             "spring.mail.host=localhost",
-            "spring.mail.port=3025" // ServerSetupTest.SMTP
+            "spring.mail.port=3025", // ServerSetupTest.SMTP
+            "app.auth.jwt.secret=c2FtcGxlLWRldi1vbmx5LXNlY3JldC1kby1ub3QtdXNlLWluLXByb2QtMzJieXRlcyE="
         })
 class NotificationFlowIntegrationTest {
 
@@ -73,6 +75,9 @@ class NotificationFlowIntegrationTest {
 
     @Autowired
     RecipientRepository recipientRepository;
+
+    @Autowired
+    NotificationRepository notificationRepository;
 
     private KafkaProducer<String, String> producer;
 
@@ -188,6 +193,13 @@ class NotificationFlowIntegrationTest {
 
         awaitEmailsTo(email, 2);
         assertThat(subjectsTo(email)).contains("Participation acceptée : Clean-up day");
+        // ...and the same notification, unread, in the bell.
+        assertThat(notificationRepository.findLatestByUserId(userId, 0, 20))
+                .singleElement()
+                .satisfies(n -> {
+                    assertThat(n.getTitle()).isEqualTo("Participation acceptée");
+                    assertThat(n.isRead()).isFalse();
+                });
     }
 
     @Test
@@ -211,6 +223,7 @@ class NotificationFlowIntegrationTest {
 
         Thread.sleep(3_000);
         assertThat(subjectsTo(email)).containsExactly("Bienvenue sur H.E.L.P");
+        assertThat(notificationRepository.countUnreadByUserId(userId)).isZero();
     }
 
     @Test

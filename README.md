@@ -36,15 +36,7 @@ Code layout: strict Clean Architecture, the same as ms-auth-java (`domain` / `ap
 
 ## Run
 
-### Full stack (recommended)
-
-From [`event-app`](https://github.com/help-platform-event/event-app), with this repo and `ms-auth-java` cloned next to it:
-
-```bash
-pnpm stack:up
-```
-
-This starts this service as well, on port 8085, with its MySQL and Mailpit.
+To run it with the rest of the platform (it needs ms-auth-java's events, and the Gateway's for participations), see the [organization page](https://github.com/help-platform-event).
 
 ### Alone, on the host (hot reload)
 
@@ -73,7 +65,7 @@ Docker must be running: the integration test uses Testcontainers (MySQL, Kafka) 
 
 ## See Kafka at work
 
-With `pnpm stack:up` running, open Kafka UI (http://localhost:8082) and Mailpit (http://localhost:8025):
+This needs the whole platform running (`pnpm stack:up`, see the [organization page](https://github.com/help-platform-event)). Open Kafka UI (http://localhost:8082) and Mailpit (http://localhost:8025):
 
 1. **Live flow.** Sign up in the Front. The message shows up in `auth.user.registered`, the welcome email in Mailpit, and the `ms-notification` consumer group stays at lag 0.
 2. **Catch-up.** Stop the service (`docker stop event-app-notification-app-1`) and sign up a few users: the group's lag grows. Start it again (`docker start event-app-notification-app-1`): it catches up and the emails arrive.

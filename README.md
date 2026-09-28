@@ -1,6 +1,6 @@
 # ms-notification-java
 
-Notification service of the [H.E.L.P platform](https://github.com/help-platform-event), in Java 21 / Spring Boot 4.
+Notification service of the [H.E.L.P platform](https://github.com/help-platform-event).
 
 It **consumes Kafka events** published by the other services and turns them into notifications for users: emails today, in-app notifications next. It never calls the other services: everything it knows about users (email, notification preferences) comes from the events.
 
@@ -32,7 +32,7 @@ Gateway ────── event.participation.requested ─┤
 - **Retries and dead-letter topic.** Each event handler sends its email itself, inside its database transaction. If sending fails (SMTP server down, 5 s timeout), the exception rolls the transaction back and Spring Kafka's standard error handler retries the event after 2 s, 4 s, then 8 s. After that it publishes the event to a **dead-letter topic** (`<topic>-dlt`, e.g. `auth.user.registered-dlt`), logs an error and moves on. The event stays there for inspection or replay. A message that can't be parsed goes straight to the dead-letter topic.
 - **Topics.** Whoever publishes a topic declares it: ms-auth and the Gateway create theirs, and this service only creates its dead-letter topics. It never creates a topic by subscribing to it.
 
-Code layout: strict Clean Architecture, the same as ms-auth-java (`domain` / `application` / `infrastructure`). See `CLAUDE.md`.
+Code layout: strict Clean Architecture, the same as ms-auth-java (`domain` / `application` / `infrastructure`).
 
 ## Run
 

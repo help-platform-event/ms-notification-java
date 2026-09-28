@@ -4,15 +4,17 @@ Notification service of the [H.E.L.P platform](https://github.com/help-platform-
 
 It **consumes Kafka events** published by the other services and turns them into notifications for users: emails today, in-app notifications next. It never calls the other services: everything it knows about users (email, notification preferences) comes from the events.
 
-> Status: work in progress. The auth-event consumer and the email pipeline are done. Business events from the Gateway (e.g. participation accepted) and in-app notifications (REST API + bell in the Front) are the next steps.
+> Status: work in progress. Emails are done: account and security emails from ms-auth's events, and participation emails from the Gateway's events, filtered by the user's preferences. In-app notifications (REST API + bell in the Front) are the next step.
 
 ## How it works
 
 ```
-ms-auth-java ── auth.user.registered ───────┐
-             ── auth.user.settings-changed ─┤
-             ── auth.password.changed ──────┤
-                                            ▼
+ms-auth-java ── auth.user.registered ─────────┐
+             ── auth.user.settings-changed ───┤
+             ── auth.password.changed ────────┤
+Gateway ────── event.participation.requested ─┤
+          ──── event.participation.decided ───┤
+                                              ▼
                           ms-notification-java  (consumer group "ms-notification")
                            ├─ recipients: local copy of users (email + notification preferences)
                            ├─ processed_events: ids of the messages already handled
@@ -26,6 +28,7 @@ ms-auth-java ── auth.user.registered ───────┐
 - **Replay.** A new consumer group starts from the oldest message (`auto-offset-reset=earliest`), and ms-auth keeps `auth.user.registered` forever. On its first start, the service therefore rebuilds its view of every existing user.
 - **Idempotency.** Kafka delivers at least once, so the same message can arrive twice (after a crash, a rebalance, an offset reset). Every handled message id is stored in `processed_events` in the same transaction as its effect, and a duplicate is ignored.
 - **Transactional emails.** A welcome email on registration, and a security email on password change. They are sent whatever the user's preferences, like the account and security categories they belong to.
+- **Event activity notifications, filtered by preferences.** The Gateway publishes `event.participation.requested` (the organizer is told someone wants to join a slot) and `event.participation.decided` (the volunteer is told whether they were accepted). Before sending, the service checks the recipient's preferences from its local copy: the master switch **and** the "event activity" switch must both be on (`NotificationPreferences.allows`). Nobody is notified of their own action (e.g. an organizer joining their own slot). A skipped event is still marked processed.
 - **Email delivery with retries.** Emails aren't sent inline: they are queued on `notification.email.requested`, keyed by user. If the SMTP server fails, the request moves to a retry topic and is tried again after 2 s, 4 s, then 8 s, without blocking the other messages. After the 4th attempt it lands on the **dead-letter topic** (`-dlt`), where it stays for inspection or replay. A message that can't be parsed goes straight to the DLT.
 
 Code layout: strict Clean Architecture, the same as ms-auth-java (`domain` / `application` / `infrastructure`). See `CLAUDE.md`.
@@ -73,8 +76,9 @@ With `pnpm stack:up` running, open Kafka UI (http://localhost:8082) and Mailpit 
 
 1. **Live flow.** Sign up in the Front. The message shows up in `auth.user.registered`, the welcome email in Mailpit, and the `ms-notification` consumer group stays at lag 0.
 2. **Catch-up.** Stop the service (`docker stop event-app-notification-app-1`) and sign up a few users: the group's lag grows. Start it again (`docker start event-app-notification-app-1`): it catches up and the emails arrive.
-3. **Retries and DLT.** Stop Mailpit (`docker stop event-app-mailpit-1`) and sign up: the email request goes through `-retry-2000`, `-retry-4000`, `-retry-8000`, then `-dlt`.
-4. **Replay without duplicates.** Stop the service, reset the group's offsets, then start it again. It re-reads everything but sends nothing twice (`processed_events`):
+3. **Preferences.** Log in as a volunteer and turn off "Activité événement" in the Settings, then have the organizer accept the volunteer's request: no email. Turn it back on and accept another request: the email arrives. The message shows up in `event.participation.decided` either way.
+4. **Retries and DLT.** Stop Mailpit (`docker stop event-app-mailpit-1`) and sign up: the email request goes through `-retry-2000`, `-retry-4000`, `-retry-8000`, then `-dlt`.
+5. **Replay without duplicates.** Stop the service, reset the group's offsets, then start it again. It re-reads everything but sends nothing twice (`processed_events`):
    ```bash
    docker exec event-app-kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka:29092 \
      --group ms-notification --reset-offsets --to-earliest --all-topics --execute

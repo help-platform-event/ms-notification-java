@@ -46,8 +46,6 @@ The Front reaches it through the Gateway (`/notifications`), which forwards the 
 
 Security: an OAuth2 resource server checks ms-auth's HS256 access tokens with the shared `JWT_SECRET` (Base64), and the user is the token's `sub` claim. `JWT_SECRET` has no default: without it, the service refuses to start.
 
-Code layout: strict Clean Architecture, the same as ms-auth-java (`domain` / `application` / `infrastructure` / `web`).
-
 ### Live push (SSE)
 
 The bell doesn't poll: `GET /api/notifications/stream` keeps an HTTP connection open and the
@@ -64,45 +62,6 @@ service writes to it only when a notification is created.
 ## Run
 
 To run it with the rest of the platform (it needs ms-auth-java's events, and the Gateway's for participations), see the [organization page](https://github.com/help-platform-event).
-
-### Alone, on the host (hot reload)
-
-This service uses ms-auth-java's Kafka broker (`localhost:9094`), so start ms-auth-java first (`./mvnw spring-boot:run` in its repo). Then, with the same JWT secret as ms-auth (here its dev value):
-
-```bash
-JWT_SECRET=c2FtcGxlLWRldi1vbmx5LXNlY3JldC1kby1ub3QtdXNlLWluLXByb2QtMzJieXRlcyE= ./mvnw spring-boot:run
-```
-
-`spring-boot-docker-compose` starts this repo's `compose.yaml` (MySQL + Mailpit). The `notification-app` service is behind the `app` profile and only runs from event-app's stack.
-
-| | URL |
-|---|---|
-| Health | http://localhost:8085/actuator/health |
-| Mailpit (every email sent) | http://localhost:8025 |
-| Kafka UI (from ms-auth-java's compose) | http://localhost:8082 |
-| MySQL | `localhost:3309`, db/user/password `ms_notification` |
-
-## Tests
-
-```bash
-./mvnw test
-```
-
-Docker must be running: the integration test uses Testcontainers (MySQL, Kafka) and an in-JVM SMTP server (GreenMail).
-
-## See Kafka at work
-
-This needs the whole platform running (`pnpm stack:up`, see the [organization page](https://github.com/help-platform-event)). Open Kafka UI (http://localhost:8082) and Mailpit (http://localhost:8025):
-
-1. **Live flow.** Sign up in the Front. The message shows up in `auth.user.registered`, the welcome email in Mailpit, and the `ms-notification` consumer group stays at lag 0.
-2. **Catch-up.** Stop the service (`docker stop event-app-notification-app-1`) and sign up a few users: the group's lag grows. Start it again (`docker start event-app-notification-app-1`): it catches up and the emails arrive.
-3. **Preferences.** Log in as a volunteer and turn off "Activité événement" in the Settings, then have the organizer accept the volunteer's request: no email and nothing in the bell. Turn it back on and accept another request: the email arrives and the bell shows it (within 30 s). The message shows up in `event.participation.decided` either way.
-4. **Retries and DLT.** Stop Mailpit (`docker stop event-app-mailpit-1`) and sign up. About 15 s later (4 attempts), the event is in `auth.user.registered-dlt` and the service logs `Giving up on auth.user.registered-…`. Start Mailpit again (`docker start event-app-mailpit-1`).
-5. **Replay without duplicates.** Stop the service, reset the group's offsets, then start it again. It re-reads everything but sends nothing twice (`processed_events`):
-   ```bash
-   docker exec event-app-kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka:29092 \
-     --group ms-notification --reset-offsets --to-earliest --all-topics --execute
-   ```
 
 ## Known limits (v1)
 

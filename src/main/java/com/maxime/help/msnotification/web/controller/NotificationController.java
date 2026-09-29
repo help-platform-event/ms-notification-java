@@ -4,9 +4,13 @@ import com.maxime.help.msnotification.application.service.NotificationQueryServi
 import com.maxime.help.msnotification.domain.model.Notification;
 import com.maxime.help.msnotification.web.dto.NotificationResponse;
 import com.maxime.help.msnotification.web.dto.UnreadCountResponse;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -18,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * The current user's in-app notifications. The user is the {@code sub} claim of ms-auth's access
@@ -27,10 +32,37 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/notifications")
 class NotificationController {
 
-    private final NotificationQueryService notificationQueryService;
+    /** Stream lifetime when the token carries no expiry (ms-auth's access tokens always do). */
+    private static final Duration DEFAULT_STREAM_TIMEOUT = Duration.ofMinutes(15);
 
-    NotificationController(NotificationQueryService notificationQueryService) {
+    /**
+     * The JWT decoder accepts a token up to 60 s past its expiry (clock skew), which would give a
+     * negative timeout; and a timeout of 0 would mean "never" to the servlet container.
+     */
+    private static final Duration MIN_STREAM_TIMEOUT = Duration.ofSeconds(1);
+
+    private final NotificationQueryService notificationQueryService;
+    private final SseNotificationStreams streams;
+    private final Clock clock;
+
+    NotificationController(
+            NotificationQueryService notificationQueryService, SseNotificationStreams streams, Clock clock) {
         this.notificationQueryService = notificationQueryService;
+        this.streams = streams;
+        this.clock = clock;
+    }
+
+    /**
+     * The user's new notifications, pushed as Server-Sent Events. The stream closes when the access
+     * token expires: the client then reconnects with a fresh one, so a stream never outlives the
+     * token that opened it.
+     */
+    @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    SseEmitter stream(@AuthenticationPrincipal Jwt jwt) {
+        Instant expiresAt = jwt.getExpiresAt();
+        Duration timeout =
+                expiresAt == null ? DEFAULT_STREAM_TIMEOUT : Duration.between(clock.instant(), expiresAt);
+        return streams.subscribe(userId(jwt), timeout.compareTo(MIN_STREAM_TIMEOUT) < 0 ? MIN_STREAM_TIMEOUT : timeout);
     }
 
     @GetMapping
@@ -40,7 +72,7 @@ class NotificationController {
                 .toList();
     }
 
-    /** The request the Front polls to refresh the bell's badge. */
+    /** The bell's badge, loaded when the page opens and each time the stream (re)connects. */
     @GetMapping("/unread-count")
     UnreadCountResponse unreadCount(@AuthenticationPrincipal Jwt jwt) {
         return new UnreadCountResponse(notificationQueryService.unreadCount(userId(jwt)));
@@ -65,7 +97,7 @@ class NotificationController {
         return UUID.fromString(jwt.getSubject());
     }
 
-    private static NotificationResponse toResponse(Notification notification) {
+    static NotificationResponse toResponse(Notification notification) {
         return new NotificationResponse(
                 notification.getId(),
                 notification.getTitle(),

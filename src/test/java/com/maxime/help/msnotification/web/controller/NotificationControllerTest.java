@@ -1,24 +1,32 @@
 package com.maxime.help.msnotification.web.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.maxime.help.msnotification.application.service.NotificationQueryService;
 import com.maxime.help.msnotification.domain.model.Notification;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** The HTTP layer with the real security rules; the user comes from a (mocked) JWT's subject. */
 @WebMvcTest(
@@ -32,10 +40,32 @@ class NotificationControllerTest {
     @Autowired MockMvc mockMvc;
 
     @MockitoBean NotificationQueryService notificationQueryService;
+    @MockitoBean SseNotificationStreams streams;
 
     @Test
     void withoutAToken_theApiAnswers401() throws Exception {
         mockMvc.perform(get("/api/notifications/unread-count")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void stream_withoutAToken_answers401() throws Exception {
+        mockMvc.perform(get("/api/notifications/stream")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void stream_opensAnEventStream_thatLastsUntilTheTokenExpires() throws Exception {
+        when(streams.subscribe(eq(USER_ID), any())).thenReturn(new SseEmitter());
+        Instant expiresAt = Instant.now().plus(Duration.ofMinutes(10));
+
+        mockMvc.perform(get("/api/notifications/stream")
+                        .with(jwt().jwt(j -> j.subject(USER_ID.toString()).expiresAt(expiresAt))))
+                .andExpect(status().isOk())
+                .andExpect(request().asyncStarted())
+                .andExpect(header().string("Content-Type", "text/event-stream"));
+
+        ArgumentCaptor<Duration> timeout = ArgumentCaptor.forClass(Duration.class);
+        verify(streams).subscribe(eq(USER_ID), timeout.capture());
+        assertThat(timeout.getValue()).isBetween(Duration.ofMinutes(9), Duration.ofMinutes(10));
     }
 
     @Test

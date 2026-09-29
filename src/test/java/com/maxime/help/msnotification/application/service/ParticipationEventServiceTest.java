@@ -14,6 +14,7 @@ import com.maxime.help.msnotification.domain.model.Notification;
 import com.maxime.help.msnotification.domain.model.NotificationPreferences;
 import com.maxime.help.msnotification.domain.model.Recipient;
 import com.maxime.help.msnotification.domain.port.out.EmailSender;
+import com.maxime.help.msnotification.domain.port.out.NotificationPusher;
 import com.maxime.help.msnotification.domain.port.out.NotificationRepository;
 import com.maxime.help.msnotification.domain.port.out.ProcessedEventRepository;
 import com.maxime.help.msnotification.domain.port.out.RecipientRepository;
@@ -53,6 +54,7 @@ class ParticipationEventServiceTest {
     @Mock private ProcessedEventRepository processedEventRepository;
     @Mock private EmailSender emailSender;
     @Mock private NotificationRepository notificationRepository;
+    @Mock private NotificationPusher notificationPusher;
     @Spy private Clock clock = Clock.fixed(Instant.parse("2026-09-28T09:00:00Z"), ZoneOffset.UTC);
 
     @InjectMocks private ParticipationEventService service;
@@ -84,6 +86,18 @@ class ParticipationEventServiceTest {
         assertThat(saved.getValue().getTitle()).isEqualTo("Nouvelle demande de participation");
         assertThat(saved.getValue().getMessage()).contains("samedi 3 octobre 2026 à 10h00", "« Clean-up day »");
         assertThat(saved.getValue().isRead()).isFalse();
+    }
+
+    @Test
+    void theSavedInAppNotification_isPushedToTheRecipientsOpenTabs() {
+        when(recipientRepository.findByUserId(ORGANIZER_ID))
+                .thenReturn(Optional.of(Recipient.registered(ORGANIZER_ID, "orga@example.com")));
+
+        service.onParticipationRequested(EVENT_ID, REQUESTED);
+
+        ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(saved.capture());
+        verify(notificationPusher).push(saved.getValue());
     }
 
     @Test
@@ -171,6 +185,7 @@ class ParticipationEventServiceTest {
 
         verify(emailSender, never()).send(any());
         verify(notificationRepository, never()).save(any());
+        verify(notificationPusher, never()).push(any());
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
 

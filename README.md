@@ -17,7 +17,7 @@ Gateway ────── event.participation.requested ─┤
                           ms-notification-java  (consumer group "ms-notification")
                            ├─ recipients: local copy of users (email + notification preferences)
                            ├─ processed_events: ids of the events already handled
-                           ├─ notifications: in-app notifications ──► REST API (the bell)
+                           ├─ notifications: in-app notifications ──► REST API + SSE stream (the bell)
                            └─ email ──► SMTP
                                 │ failure: retried after 2 s, 4 s, 8 s
                                 ▼
@@ -39,13 +39,27 @@ The Front reaches it through the Gateway (`/notifications`), which forwards the 
 | Method | Path | |
 |---|---|---|
 | `GET` | `/api/notifications?page=0` | The user's notifications, newest first (20 per page) |
-| `GET` | `/api/notifications/unread-count` | `{ "count": n }`: what the bell polls every 30 s |
+| `GET` | `/api/notifications/stream` | Server-Sent Events: each new notification, pushed as `event: notification` (see below) |
+| `GET` | `/api/notifications/unread-count` | `{ "count": n }`: the bell's badge, reloaded each time the stream (re)connects |
 | `PATCH` | `/api/notifications/{id}/read` | 204; 404 if unknown **or someone else's** (so other users' ids can't be probed) |
 | `POST` | `/api/notifications/read-all` | 204 |
 
 Security: an OAuth2 resource server checks ms-auth's HS256 access tokens with the shared `JWT_SECRET` (Base64), and the user is the token's `sub` claim. `JWT_SECRET` has no default: without it, the service refuses to start.
 
 Code layout: strict Clean Architecture, the same as ms-auth-java (`domain` / `application` / `infrastructure` / `web`).
+
+### Live push (SSE)
+
+The bell doesn't poll: `GET /api/notifications/stream` keeps an HTTP connection open and the
+service writes to it only when a notification is created.
+
+- Each browser tab has its own stream (`SseEmitter`), kept per user in `SseNotificationStreams`.
+- A notification is pushed **after the transaction that saved it commits** (a rolled-back one is
+  never shown), to every open tab of its recipient.
+- A comment (`:keep-alive`) is written every 25 s: it keeps idle connections open through the
+  Gateway and proxies, and writing to a closed connection removes the stream of a user who left.
+- The stream closes when the access token expires; the Front reconnects with a fresh token and
+  reloads the unread count, which catches up on anything missed while disconnected.
 
 ## Run
 
@@ -93,6 +107,6 @@ This needs the whole platform running (`pnpm stack:up`, see the [organization pa
 ## Known limits (v1)
 
 - **At least once:** a crash between sending an email and committing can send it twice (see Idempotency).
-- **Polling, not push:** the bell learns about a new notification within 30 s (or as soon as the tab regains focus), not instantly.
+- **One instance only:** the open SSE streams live in memory (`SseNotificationStreams`). With several instances, a user's stream and their notification could land on different ones; it would take a fan-out (e.g. every instance consuming a `notification.created` topic).
 - **One switch per category:** a user can't choose "email yes, bell no".
 - **Deleted events:** their notifications stay in the bell.

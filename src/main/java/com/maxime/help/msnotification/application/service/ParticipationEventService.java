@@ -5,6 +5,7 @@ import com.maxime.help.msnotification.domain.model.Notification;
 import com.maxime.help.msnotification.domain.model.NotificationCategory;
 import com.maxime.help.msnotification.domain.model.Recipient;
 import com.maxime.help.msnotification.domain.port.out.EmailSender;
+import com.maxime.help.msnotification.domain.port.out.NotificationPusher;
 import com.maxime.help.msnotification.domain.port.out.NotificationRepository;
 import com.maxime.help.msnotification.domain.port.out.ProcessedEventRepository;
 import com.maxime.help.msnotification.domain.port.out.RecipientRepository;
@@ -20,10 +21,11 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Reacts to the Gateway's participation events. Unlike the transactional auth emails, these are
  * {@link NotificationCategory#EVENT_ACTIVITY} notifications, sent only if the recipient's
- * preferences allow them: an in-app notification (the bell), then an email if the address is
- * known. Every event is marked processed, whether or not something was sent, so a redelivery is
- * ignored either way. If the email fails, the whole method rolls back (in-app notification
- * included) and the event is consumed again.
+ * preferences allow them: an in-app notification (the bell, pushed live to the recipient's open
+ * tabs once the transaction commits), then an email if the address is known. Every event is
+ * marked processed, whether or not something was sent, so a redelivery is ignored either way. If
+ * the email fails, the whole method rolls back (in-app notification included, never pushed) and
+ * the event is consumed again.
  */
 @Service
 public class ParticipationEventService {
@@ -33,6 +35,7 @@ public class ParticipationEventService {
     private final RecipientRepository recipientRepository;
     private final ProcessedEventRepository processedEventRepository;
     private final NotificationRepository notificationRepository;
+    private final NotificationPusher notificationPusher;
     private final EmailSender emailSender;
     private final Clock clock;
 
@@ -40,11 +43,13 @@ public class ParticipationEventService {
             RecipientRepository recipientRepository,
             ProcessedEventRepository processedEventRepository,
             NotificationRepository notificationRepository,
+            NotificationPusher notificationPusher,
             EmailSender emailSender,
             Clock clock) {
         this.recipientRepository = recipientRepository;
         this.processedEventRepository = processedEventRepository;
         this.notificationRepository = notificationRepository;
+        this.notificationPusher = notificationPusher;
         this.emailSender = emailSender;
         this.clock = clock;
     }
@@ -83,6 +88,7 @@ public class ParticipationEventService {
         }
         recipientToNotify(activity).ifPresent(recipient -> {
             notificationRepository.save(inApp);
+            notificationPusher.push(inApp);
             recipient.getEmail().ifPresentOrElse(
                     to -> emailSender.send(email.apply(to)),
                     () -> log.warn("No known email for user {}: participation {} notified in-app only",

@@ -39,6 +39,8 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: 'kafka:29092'
       MAIL_HOST: 'mailpit'
       MAIL_PORT: '1025'
+      # Must match ms-auth-java's dev JWT_SECRET (its compose.yaml): the API checks its tokens.
+      JWT_SECRET: 'c2FtcGxlLWRldi1vbmx5LXNlY3JldC1kby1ub3QtdXNlLWluLXByb2QtMzJieXRlcyE='
     depends_on:
       notification-mysql:
         condition: service_healthy

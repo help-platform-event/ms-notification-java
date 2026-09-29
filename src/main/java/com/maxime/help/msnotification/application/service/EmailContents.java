@@ -18,6 +18,11 @@ final class EmailContents {
 
     private EmailContents() {}
 
+    /** The slot's start as users read it, e.g. "samedi 3 octobre 2026 à 10h00". */
+    static String slotDate(ParticipationActivity activity) {
+        return SLOT_DATE.format(activity.slotStartAt());
+    }
+
     static Email welcome(String to) {
         return new Email(
                 to,
@@ -55,11 +60,11 @@ final class EmailContents {
                 Un bénévole demande à participer au créneau du %s de votre événement « %s ».
                 Connectez-vous à H.E.L.P pour accepter ou refuser sa demande.
 
-                L'équipe H.E.L.P""".formatted(SLOT_DATE.format(activity.slotStartAt()), activity.eventTitle()));
+                L'équipe H.E.L.P""".formatted(slotDate(activity), activity.eventTitle()));
     }
 
     static Email participationDecided(String to, ParticipationActivity activity, boolean accepted) {
-        String slot = SLOT_DATE.format(activity.slotStartAt());
+        String slot = slotDate(activity);
         String title = activity.eventTitle();
         return new Email(
                 to,
@@ -77,6 +82,29 @@ final class EmailContents {
 
                         Votre participation au créneau du %s de l'événement « %s » n'a pas été \
                         retenue par l'organisateur. D'autres créneaux vous attendent sur H.E.L.P.
+
+                        L'équipe H.E.L.P""".formatted(slot, title));
+    }
+
+    static Email participationCancelled(String to, ParticipationActivity activity, boolean byOrganizer) {
+        String slot = slotDate(activity);
+        String title = activity.eventTitle();
+        return new Email(
+                to,
+                "Participation annulée : " + oneLine(title),
+                byOrganizer
+                        ? """
+                        Bonjour,
+
+                        L'organisateur a annulé votre participation au créneau du %s de l'événement \
+                        « %s ». D'autres créneaux vous attendent sur H.E.L.P.
+
+                        L'équipe H.E.L.P""".formatted(slot, title)
+                        : """
+                        Bonjour,
+
+                        Un bénévole a annulé sa participation au créneau du %s de votre événement \
+                        « %s ». La place est de nouveau disponible.
 
                         L'équipe H.E.L.P""".formatted(slot, title));
     }

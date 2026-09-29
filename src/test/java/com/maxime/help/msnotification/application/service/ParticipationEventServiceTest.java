@@ -10,12 +10,16 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.maxime.help.msnotification.domain.model.Email;
+import com.maxime.help.msnotification.domain.model.Notification;
 import com.maxime.help.msnotification.domain.model.NotificationPreferences;
 import com.maxime.help.msnotification.domain.model.Recipient;
 import com.maxime.help.msnotification.domain.port.out.EmailSender;
+import com.maxime.help.msnotification.domain.port.out.NotificationRepository;
 import com.maxime.help.msnotification.domain.port.out.ProcessedEventRepository;
 import com.maxime.help.msnotification.domain.port.out.RecipientRepository;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -23,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mail.MailSendException;
 
@@ -47,6 +52,8 @@ class ParticipationEventServiceTest {
     @Mock private RecipientRepository recipientRepository;
     @Mock private ProcessedEventRepository processedEventRepository;
     @Mock private EmailSender emailSender;
+    @Mock private NotificationRepository notificationRepository;
+    @Spy private Clock clock = Clock.fixed(Instant.parse("2026-09-28T09:00:00Z"), ZoneOffset.UTC);
 
     @InjectMocks private ParticipationEventService service;
 
@@ -62,6 +69,21 @@ class ParticipationEventServiceTest {
         assertThat(email.subject()).isEqualTo("Nouvelle demande de participation : Clean-up day");
         assertThat(email.body()).contains("samedi 3 octobre 2026 à 10h00", "« Clean-up day »");
         verify(processedEventRepository).markProcessed(EVENT_ID);
+    }
+
+    @Test
+    void requested_alsoCreatesAnUnreadInAppNotificationForTheOrganizer() {
+        when(recipientRepository.findByUserId(ORGANIZER_ID))
+                .thenReturn(Optional.of(Recipient.registered(ORGANIZER_ID, "orga@example.com")));
+
+        service.onParticipationRequested(EVENT_ID, REQUESTED);
+
+        ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(saved.capture());
+        assertThat(saved.getValue().getUserId()).isEqualTo(ORGANIZER_ID);
+        assertThat(saved.getValue().getTitle()).isEqualTo("Nouvelle demande de participation");
+        assertThat(saved.getValue().getMessage()).contains("samedi 3 octobre 2026 à 10h00", "« Clean-up day »");
+        assertThat(saved.getValue().isRead()).isFalse();
     }
 
     @Test
@@ -100,6 +122,46 @@ class ParticipationEventServiceTest {
     }
 
     @Test
+    void cancelledByTheVolunteer_tellsTheOrganizer() {
+        when(recipientRepository.findByUserId(ORGANIZER_ID))
+                .thenReturn(Optional.of(Recipient.registered(ORGANIZER_ID, "orga@example.com")));
+
+        service.onParticipationCancelled(EVENT_ID, REQUESTED, false);
+
+        ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(saved.capture());
+        assertThat(saved.getValue().getTitle()).isEqualTo("Participation annulée");
+        assertThat(saved.getValue().getMessage()).startsWith("Un bénévole a annulé sa participation");
+        assertThat(capturedEmail().subject()).isEqualTo("Participation annulée : Clean-up day");
+    }
+
+    @Test
+    void cancelledByTheOrganizer_tellsTheVolunteer() {
+        when(recipientRepository.findByUserId(VOLUNTEER_ID))
+                .thenReturn(Optional.of(Recipient.registered(VOLUNTEER_ID, "vol@example.com")));
+
+        service.onParticipationCancelled(EVENT_ID, DECIDED, true);
+
+        ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(saved.capture());
+        assertThat(saved.getValue().getMessage()).startsWith("L'organisateur a annulé votre participation");
+        assertThat(capturedEmail().body()).contains("L'organisateur a annulé votre participation");
+    }
+
+    @Test
+    void cancellation_isNotSent_whenEventActivityIsMuted() {
+        Recipient muted = Recipient.registered(ORGANIZER_ID, "orga@example.com");
+        muted.changePreferences(new NotificationPreferences(true, false, true, true, true, true, true));
+        when(recipientRepository.findByUserId(ORGANIZER_ID)).thenReturn(Optional.of(muted));
+
+        service.onParticipationCancelled(EVENT_ID, REQUESTED, false);
+
+        verify(notificationRepository, never()).save(any());
+        verify(emailSender, never()).send(any());
+        verify(processedEventRepository).markProcessed(EVENT_ID);
+    }
+
+    @Test
     void eventActivityMuted_sendsNothing_butMarksTheEventProcessed() {
         Recipient muted = Recipient.registered(VOLUNTEER_ID, "vol@example.com");
         muted.changePreferences(new NotificationPreferences(true, false, true, true, true, true, true));
@@ -108,6 +170,7 @@ class ParticipationEventServiceTest {
         service.onParticipationDecided(EVENT_ID, DECIDED, true);
 
         verify(emailSender, never()).send(any());
+        verify(notificationRepository, never()).save(any());
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
 
@@ -133,12 +196,13 @@ class ParticipationEventServiceTest {
     }
 
     @Test
-    void recipientWithoutKnownEmail_sendsNothing() {
+    void recipientWithoutKnownEmail_isStillNotifiedInApp() {
         when(recipientRepository.findByUserId(ORGANIZER_ID))
                 .thenReturn(Optional.of(Recipient.withPreferencesOnly(ORGANIZER_ID, NotificationPreferences.defaults())));
 
         service.onParticipationRequested(EVENT_ID, REQUESTED);
 
+        verify(notificationRepository).save(any(Notification.class));
         verify(emailSender, never()).send(any());
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
@@ -149,7 +213,7 @@ class ParticipationEventServiceTest {
 
         service.onParticipationRequested(EVENT_ID, self);
 
-        verifyNoInteractions(recipientRepository, emailSender);
+        verifyNoInteractions(recipientRepository, emailSender, notificationRepository);
         verify(processedEventRepository).markProcessed(EVENT_ID);
     }
 
@@ -171,7 +235,7 @@ class ParticipationEventServiceTest {
         service.onParticipationRequested(EVENT_ID, REQUESTED);
         service.onParticipationDecided(EVENT_ID, DECIDED, true);
 
-        verifyNoInteractions(recipientRepository, emailSender);
+        verifyNoInteractions(recipientRepository, emailSender, notificationRepository);
         verify(processedEventRepository, never()).markProcessed(any());
     }
 
